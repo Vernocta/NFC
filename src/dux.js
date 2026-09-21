@@ -79,11 +79,65 @@ function enqueueShift(db, shiftId, { force = false } = {}) {
   return { queued: true, requeued: true };
 }
 
-function targetUrl() {
-  const { baseUrl, timesheetPath, authMode, authQueryParam, apiKey } = config.dux;
-  const url = new URL(`${baseUrl}${timesheetPath.startsWith('/') ? '' : '/'}${timesheetPath}`);
+/** Join the configured base with an endpoint path and Dux's standard params. */
+function duxUrl(endpointPath, { withEmpresa = true } = {}) {
+  const { baseUrl, empresaId, authMode, authQueryParam, apiKey } = config.dux;
+  const url = new URL(`${baseUrl}${endpointPath.startsWith('/') ? '' : '/'}${endpointPath}`);
+  if (withEmpresa && empresaId) url.searchParams.set('id_empresa', empresaId);
   if (authMode === 'query' && apiKey) url.searchParams.set(authQueryParam, apiKey);
   return url.toString();
+}
+
+function targetUrl() {
+  return duxUrl(config.dux.timesheetPath);
+}
+
+/**
+ * Check the token against `GET /empresas`, which takes no parameters and
+ * returns the companies it can see — including the id_empresa that every
+ * other Dux call needs.
+ */
+async function testConnection({ fetchImpl = globalThis.fetch } = {}) {
+  if (!config.dux.baseUrl) return { ok: false, error: 'DUX_BASE_URL is empty' };
+  if (!config.dux.apiKey) return { ok: false, error: 'DUX_API_KEY is empty' };
+
+  const url = duxUrl('/empresas', { withEmpresa: false });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.dux.timeoutMs);
+  try {
+    const response = await fetchImpl(url, {
+      method: 'GET',
+      headers: requestHeaders(),
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let body;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = text;
+    }
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error:
+          response.status === 401 || response.status === 403
+            ? 'Dux rejected the token (401/403). Regenerate it in Dux and check DUX_API_KEY.'
+            : `HTTP ${response.status}: ${String(text).slice(0, 200)}`,
+      };
+    }
+    const empresas = (body?.datos || []).map((e) => ({
+      id_empresa: e.id_empresa,
+      razon_social: e.razon_social,
+      cuit: e.cuit,
+    }));
+    return { ok: true, status: response.status, url, empresas };
+  } catch (error) {
+    return { ok: false, error: error.name === 'AbortError' ? 'Timed out reaching Dux' : error.message };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function requestHeaders() {
@@ -242,6 +296,8 @@ function startSyncLoop(db, { intervalSeconds = config.dux.syncIntervalSeconds } 
 
 module.exports = {
   buildPayload,
+  duxUrl,
+  testConnection,
   enqueueShift,
   pushPayload,
   deliver,

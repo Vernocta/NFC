@@ -533,6 +533,39 @@ $('dux-run').addEventListener('click', async () => {
   }
 });
 
+$('dux-test').addEventListener('click', async () => {
+  const box = $('dux-test-result');
+  $('dux-test').disabled = true;
+  box.innerHTML = '<span class="muted" style="font-size:13px">Consultando a Dux…</span>';
+  try {
+    const result = await api('/dux/test', { method: 'POST' });
+    box.innerHTML = result.ok
+      ? `<p style="font-size:13px;margin:0"><span class="badge badge--sent">Token válido</span></p>
+         <p class="muted" style="font-size:13px;margin:8px 0 0">
+           Empresas visibles con este token — copiá el id_empresa a <code>DUX_EMPRESA_ID</code>:
+         </p>
+         <div class="table-wrap"><table>
+           <thead><tr><th>id_empresa</th><th>Razón social</th><th>CUIT</th></tr></thead>
+           <tbody>${
+             result.empresas.length
+               ? result.empresas
+                   .map(
+                     (e) =>
+                       `<tr><td><code>${esc(e.id_empresa)}</code></td><td>${esc(e.razon_social)}</td><td class="muted">${esc(e.cuit || '')}</td></tr>`
+                   )
+                   .join('')
+               : '<tr><td colspan="3" class="empty">El token funciona pero no ve ninguna empresa.</td></tr>'
+           }</tbody>
+         </table></div>`
+      : `<p style="font-size:13px;margin:0"><span class="badge badge--failed">Sin conexión</span></p>
+         <p class="muted" style="font-size:13px;margin:8px 0 0">${esc(result.error)}</p>`;
+  } catch (error) {
+    box.innerHTML = `<span class="muted" style="font-size:13px">${esc(error.message)}</span>`;
+  } finally {
+    $('dux-test').disabled = false;
+  }
+});
+
 $('dux-sync').addEventListener('click', async () => {
   const result = await api('/dux/sync', { method: 'POST' });
   toast(result.skipped ? 'Dux no está configurado.' : `Enviados ${result.sent}, con error ${result.failed}.`, Boolean(result.skipped));

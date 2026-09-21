@@ -3,6 +3,7 @@
 process.env.TZ_NAME = 'America/Argentina/Buenos_Aires';
 process.env.DUX_BASE_URL = 'https://erp.example.test';
 process.env.DUX_API_KEY = 'secret-key';
+process.env.DUX_TIMESHEET_PATH = '/api/v1/asistencias';
 process.env.DUX_SYNC_MODE = 'daily';
 process.env.DUX_DAILY_TIME = '17:00';
 process.env.SCAN_DEBOUNCE_SECONDS = '0';

@@ -66,13 +66,16 @@ const config = {
   dbPath: path.resolve(__dirname, '..', str('DB_PATH', './data/timeclock.db')),
 
   dux: {
+    // Dux's REST base, confirmed against developers.duxsoftware.com.ar.
     baseUrl: str('DUX_BASE_URL', '').replace(/\/+$/, ''),
     apiKey: str('DUX_API_KEY', ''),
+    // Dux scopes almost every call to one company; GET /empresas lists yours.
+    empresaId: str('DUX_EMPRESA_ID', ''),
     authMode: str('DUX_AUTH_MODE', 'header'),
     authHeader: str('DUX_AUTH_HEADER', 'Authorization'),
     authPrefix: str('DUX_AUTH_PREFIX', 'Bearer'),
     authQueryParam: str('DUX_AUTH_QUERY_PARAM', 'key'),
-    timesheetPath: str('DUX_TIMESHEET_PATH', '/api/v1/asistencias'),
+    timesheetPath: str('DUX_TIMESHEET_PATH', ''),
     method: str('DUX_HTTP_METHOD', 'POST').toUpperCase(),
     extraFields: json('DUX_EXTRA_FIELDS', {}),
     syncEnabled: bool('DUX_SYNC_ENABLED', true),
@@ -91,6 +94,9 @@ const config = {
   dailyExportDir: str('DAILY_EXPORT_DIR', ''),
 };
 
-config.dux.configured = Boolean(config.dux.baseUrl);
+// A base URL alone is not enough to push: Dux has no attendance endpoint, so
+// the destination path has to be named explicitly.
+config.dux.configured = Boolean(config.dux.baseUrl && config.dux.timesheetPath);
+config.dux.credentialsPresent = Boolean(config.dux.baseUrl && config.dux.apiKey);
 
 module.exports = config;

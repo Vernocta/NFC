@@ -339,6 +339,9 @@ router.post('/dux/sync', async (req, res) => {
 
 router.post('/dux/retry', (req, res) => res.json(dux.retryFailed(getDb())));
 
+// Verify the token before trusting the nightly upload with it.
+router.post('/dux/test', async (req, res) => res.json(await dux.testConnection()));
+
 router.post('/dux/push/:shiftId', async (req, res) => {
   const db = getDb();
   const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(req.params.shiftId);

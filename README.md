@@ -125,22 +125,31 @@ day beside each upload. The previous day's file is refreshed on every run,
 so a check-out at 18:00 still lands in the right file.
 
 ```bash
-DUX_BASE_URL=https://erp.duxsoftware.com.ar
-DUX_API_KEY=your-key
-DUX_TIMESHEET_PATH=/api/v1/asistencias
-DUX_AUTH_MODE=header          # header | query
+DUX_BASE_URL=https://erp.duxsoftware.com.ar/WSERP/rest/services/v2
+DUX_API_KEY=your-token        # generated inside Dux
+DUX_EMPRESA_ID=               # press "Probar conexión" to find it
+DUX_AUTH_MODE=header          # Dux uses: Authorization: Bearer <token>
 DUX_AUTH_HEADER=Authorization
 DUX_AUTH_PREFIX=Bearer
+DUX_TIMESHEET_PATH=           # see the note below
 DUX_EXTRA_FIELDS={"sucursal":"OBRA-1"}
 ```
 
-> **Adjust these to your Dux account.** Dux issues the base URL, the key and
-> the endpoint path per customer, and the exact attendance endpoint depends on
-> which Dux modules you have. The values above are placeholders; the path,
-> the auth style and any extra fields are all configuration, so no code has to
-> change. Confirm the endpoint with Dux support, put it in `.env`, and use
-> **Admin → Horas → Enviar a Dux** on one shift to verify before enabling the
-> automatic sync.
+**Admin → Dux → Probar conexión** calls `GET /empresas`, the one Dux endpoint
+that takes no parameters. It tells you whether the token works and prints the
+`id_empresa` values it can see, which is what `DUX_EMPRESA_ID` needs. Every
+other Dux call is scoped to one company and gets `id_empresa` added
+automatically.
+
+> **Dux has no attendance endpoint.** Its published API covers the commercial
+> side — facturas, clientes, items, pedidos, gastos — and there is no
+> endpoint for hours worked, attendance or payroll. Dux's own guidance is that
+> salaries are recorded through the **Gastos** module, since it has no payroll
+> module. So out of the box this system gives you the hours as CSV for the
+> liquidación, and `DUX_TIMESHEET_PATH` is left empty. Set it only if you have
+> an endpoint that should receive the shifts — a Dux endpoint agreed with their
+> support, or middleware of your own — and `buildPayload()` in `src/dux.js`
+> is the single place the field names are mapped.
 
 The body sent for one shift:
 
@@ -212,6 +221,7 @@ All settings live in `.env` (see `.env.example`).
 | `DUX_DAILY_TIME` | `17:00` | Local time of the daily upload |
 | `DUX_CATCH_UP_ON_START` | `true` | Upload on boot if the hour was missed |
 | `DUX_RETRY_INTERVAL_SECONDS` | `900` | Retry gap when a run cannot drain the queue |
+| `DUX_EMPRESA_ID` | empty | Dux company id, added to every Dux call |
 | `DUX_*` | see above | Dux endpoint, auth and retry limits |
 | `DAILY_EXPORT_DIR` | empty | Optional CSV copy written at upload time |
 | `DB_PATH` | `./data/timeclock.db` | SQLite file |
@@ -243,6 +253,7 @@ Admin — every route needs `Authorization: Bearer $ADMIN_TOKEN`:
 | `GET` | `/api/admin/export/shifts.csv` | Detail CSV |
 | `GET` | `/api/admin/export/summary.csv` | Summary CSV |
 | `GET` | `/api/admin/dux/status` | Queue counters, last error and the schedule |
+| `POST` | `/api/admin/dux/test` | Verify the token against `GET /empresas` |
 | `GET` | `/api/admin/sync/schedule` | Next run, last run, recent upload history |
 | `POST` | `/api/admin/sync/run` | Run the daily batch now |
 | `POST` | `/api/admin/dux/sync` | Drain the queue now |
@@ -301,12 +312,13 @@ deploy/          systemd unit and kiosk autostart notes
 npm test
 ```
 
-41 tests covering UID normalization across reader formats, business-day and
+46 tests covering UID normalization across reader formats, business-day and
 rounding maths, the full punch lifecycle (toggle, debounce, break deduction,
 auto-close, enrollment conflicts), the Dux payload, its retry/backoff and
 give-up behaviour, the daily upload (next-run time across midnight, open
 shifts deferred to the next run, catch-up detection, overlap locking, the
-CSV copy), and the HTTP API end to end including auth and CSV export.
+CSV copy), the Dux connection test against `/empresas`, and the HTTP API end
+to end including auth and CSV export.
 
 ## 11. Ideas for later
 
