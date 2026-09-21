@@ -73,6 +73,17 @@ const dateTime = (iso) =>
   }).format(new Date(iso));
 
 const STATUS_LABEL = { open: 'Abierto', closed: 'Cerrado', auto_closed: 'Auto-cerrado' };
+const RUN_LABEL = { daily: 'Programada', manual: 'Manual', retry: 'Reintento', catch_up: 'Recuperación' };
+
+/** "hoy 17:00" / "mañana 17:00", so the next run reads at a glance. */
+function relativeRun(iso) {
+  if (!iso) return '—';
+  const target = new Date(iso);
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(target);
+  const today = todayIso();
+  const prefix = day === today ? 'hoy' : day === addDays(today, 1) ? 'mañana' : day;
+  return `${prefix} ${clockTime(iso)}`;
+}
 const DUX_LABEL = { sent: 'Enviado', pending: 'Pendiente', failed: 'Error' };
 
 const money = (value) =>
@@ -151,6 +162,10 @@ async function loadBoard() {
 
   $('stat-onsite').textContent = onSite.length;
   $('stat-pending').textContent = dux.counts.pending + dux.counts.failed;
+  $('stat-next').textContent =
+    dux.schedule?.mode === 'daily'
+      ? `Próxima subida: ${relativeRun(dux.schedule.nextRunAt)}`
+      : 'Subida continua';
   $('stat-hours').textContent = sheet.summary.reduce((sum, s) => sum + s.hours, 0).toFixed(2);
 
   $('onsite-body').innerHTML = onSite.length
@@ -430,6 +445,7 @@ $('dl-shifts').addEventListener('click', () => {
 
 async function loadDux() {
   const status = await api('/dux/status');
+  renderSchedule(status.schedule);
   $('dux-status').innerHTML = `
     <div class="grid">
       <div><label>Estado</label>${
@@ -454,6 +470,68 @@ async function loadDux() {
         : '<p class="muted" style="font-size:13px;margin-bottom:0">Los fichajes se guardan igual y quedan en cola. Cargá DUX_BASE_URL y DUX_API_KEY en el archivo .env y reiniciá el servicio para empezar a enviarlos.</p>'
     }`;
 }
+
+function renderSchedule(schedule) {
+  if (!schedule) return;
+  const daily = schedule.mode === 'daily';
+  const last = schedule.lastRun;
+
+  $('dux-schedule').innerHTML = `
+    <div class="grid">
+      <div><label>Modo</label>${
+        daily
+          ? `<strong>Una vez por día a las ${esc(schedule.dailyTime)}</strong>`
+          : `<strong>Continua (cada ${schedule.intervalSeconds}s)</strong>`
+      }</div>
+      <div><label>Zona horaria</label>${esc(schedule.timezone)}</div>
+      <div><label>Próxima subida</label><strong>${daily ? relativeRun(schedule.nextRunAt) : 'continua'}</strong></div>
+      <div><label>Última subida</label>${
+        last ? `${dateTime(last.started_at)} · ${last.sent} enviados` : '<span class="muted">todavía ninguna</span>'
+      }</div>
+      ${schedule.exportDir ? `<div><label>Copia CSV</label><code style="font-size:12px">${esc(schedule.exportDir)}</code></div>` : ''}
+    </div>
+    ${
+      daily
+        ? '<p class="muted" style="font-size:13px;margin-bottom:0">Los turnos que sigan abiertos a esa hora viajan en la subida del día siguiente, una vez que la persona marque la salida.</p>'
+        : ''
+    }`;
+
+  $('runs-body').innerHTML = (schedule.history || []).length
+    ? schedule.history
+        .map(
+          (run) => `<tr>
+            <td>${dateTime(run.started_at)}</td>
+            <td><span class="badge">${RUN_LABEL[run.kind] || esc(run.kind)}</span></td>
+            <td class="num">${run.sent}</td>
+            <td class="num">${run.failed}</td>
+            <td class="num">${run.remaining}</td>
+            <td>${
+              run.error
+                ? `<span class="badge badge--failed" title="${esc(run.error)}">${
+                    run.error === 'dux_not_configured' ? 'Dux sin configurar' : 'Error'
+                  }</span>`
+                : '<span class="badge badge--sent">OK</span>'
+            }</td>
+          </tr>`
+        )
+        .join('')
+    : '<tr><td colspan="6" class="empty">Sin subidas registradas todavía.</td></tr>';
+}
+
+$('dux-run').addEventListener('click', async () => {
+  $('dux-run').disabled = true;
+  try {
+    const result = await api('/sync/run', { method: 'POST' });
+    if (result.skipped) toast('Ya hay una subida en curso.', true);
+    else if (result.error === 'dux_not_configured') toast('Dux no está configurado: los turnos siguen en cola.', true);
+    else toast(`Subida lista: ${result.sent} enviados, ${result.remaining} en cola.`);
+    loadDux();
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    $('dux-run').disabled = false;
+  }
+});
 
 $('dux-sync').addEventListener('click', async () => {
   const result = await api('/dux/sync', { method: 'POST' });

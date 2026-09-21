@@ -76,10 +76,19 @@ const config = {
     method: str('DUX_HTTP_METHOD', 'POST').toUpperCase(),
     extraFields: json('DUX_EXTRA_FIELDS', {}),
     syncEnabled: bool('DUX_SYNC_ENABLED', true),
+    // 'daily'      -> one batch at DUX_DAILY_TIME
+    // 'continuous' -> push each shift a minute or so after check-out
+    syncMode: str('DUX_SYNC_MODE', 'daily').toLowerCase() === 'continuous' ? 'continuous' : 'daily',
+    dailyTime: str('DUX_DAILY_TIME', '17:00'),
+    catchUpOnStart: bool('DUX_CATCH_UP_ON_START', true),
+    retryIntervalSeconds: num('DUX_RETRY_INTERVAL_SECONDS', 900),
     syncIntervalSeconds: num('DUX_SYNC_INTERVAL_SECONDS', 60),
     maxAttempts: num('DUX_MAX_ATTEMPTS', 8),
     timeoutMs: num('DUX_TIMEOUT_MS', 15000),
   },
+
+  // Optional: drop a CSV of the day next to each scheduled upload.
+  dailyExportDir: str('DAILY_EXPORT_DIR', ''),
 };
 
 config.dux.configured = Boolean(config.dux.baseUrl);

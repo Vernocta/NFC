@@ -5,6 +5,7 @@ const config = require('../config');
 const time = require('../time');
 const clock = require('../clock');
 const dux = require('../dux');
+const scheduler = require('../scheduler');
 const timesheet = require('../timesheet');
 const { getDb } = require('../db');
 const { normalizeUid } = require('../uid');
@@ -301,7 +302,36 @@ router.get('/export/summary.csv', (req, res) => {
 
 /* -------------------------------------------------------------------- dux */
 
-router.get('/dux/status', (req, res) => res.json(dux.outboxStatus(getDb())));
+router.get('/dux/status', (req, res) => {
+  const db = getDb();
+  res.json({
+    ...dux.outboxStatus(db),
+    schedule: describeSchedule(db),
+  });
+});
+
+/** When the next automatic upload is due, and how the last ones went. */
+function describeSchedule(db) {
+  const daily = config.dux.syncMode === 'daily';
+  return {
+    mode: config.dux.syncMode,
+    dailyTime: config.dux.dailyTime,
+    timezone: config.timezone,
+    intervalSeconds: config.dux.syncIntervalSeconds,
+    nextRunAt: daily ? scheduler.nextRunAt().toISOString() : null,
+    lastRun: scheduler.lastRun(db) || null,
+    history: scheduler.recentRuns(db, 10),
+    exportDir: config.dailyExportDir || null,
+  };
+}
+
+router.get('/sync/schedule', (req, res) => res.json(describeSchedule(getDb())));
+
+// The same batch the scheduler runs, on demand.
+router.post('/sync/run', async (req, res) => {
+  const result = await scheduler.runUpload(getDb(), { kind: 'manual' });
+  res.json(result);
+});
 
 router.post('/dux/sync', async (req, res) => {
   res.json(await dux.processOutbox(getDb(), { limit: Number(req.body?.limit) || 50 }));

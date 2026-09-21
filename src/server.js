@@ -6,6 +6,7 @@ const config = require('./config');
 const time = require('./time');
 const clock = require('./clock');
 const dux = require('./dux');
+const scheduler = require('./scheduler');
 const { getDb } = require('./db');
 
 function createApp() {
@@ -53,7 +54,9 @@ function start() {
   sweep();
   setInterval(sweep, 60 * 60 * 1000).unref();
 
-  dux.startSyncLoop(db);
+  // One scheduled batch a day, or a push shortly after every check-out.
+  const daily = config.dux.syncMode === 'daily';
+  const upload = daily ? scheduler.startDailyScheduler(db) : dux.startSyncLoop(db) && null;
 
   const server = createApp().listen(config.port, config.host, () => {
     console.log(`NFC time clock listening on http://${config.host}:${config.port}`);
@@ -64,10 +67,18 @@ function start() {
         ? `  dux    →  ${dux.targetUrl()}`
         : '  dux    →  not configured (punches queue locally; CSV export available)'
     );
+    console.log(
+      daily
+        ? `  upload →  daily at ${config.dux.dailyTime} ${config.timezone} (next: ${scheduler
+            .nextRunAt()
+            .toISOString()})`
+        : `  upload →  continuous, every ${config.dux.syncIntervalSeconds}s`
+    );
   });
 
   const shutdown = () => {
     console.log('\nShutting down…');
+    upload?.stop();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5000).unref();
   };

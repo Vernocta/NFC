@@ -80,6 +80,22 @@ CREATE TABLE IF NOT EXISTS dux_outbox (
 CREATE INDEX IF NOT EXISTS idx_outbox_status ON dux_outbox(status, next_attempt_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_shift ON dux_outbox(shift_id);
 
+CREATE TABLE IF NOT EXISTS sync_runs (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind          TEXT    NOT NULL DEFAULT 'daily'
+                CHECK (kind IN ('daily', 'manual', 'retry', 'catch_up')),
+  business_day  TEXT    NOT NULL,
+  started_at    TEXT    NOT NULL,
+  finished_at   TEXT,
+  sent          INTEGER NOT NULL DEFAULT 0,
+  failed        INTEGER NOT NULL DEFAULT 0,
+  remaining     INTEGER NOT NULL DEFAULT 0,
+  open_shifts   INTEGER NOT NULL DEFAULT 0,
+  export_file   TEXT,
+  error         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sync_runs_day ON sync_runs(business_day, started_at);
+
 CREATE TABLE IF NOT EXISTS unknown_scans (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   uid        TEXT NOT NULL,

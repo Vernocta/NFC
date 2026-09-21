@@ -8,7 +8,7 @@ export as the fallback path.
 ```
  keychain tag ──▶ USB reader ──▶ kiosk page ──▶ server ──▶ SQLite
                                                    │
-                                                   ├──▶ Dux REST API (queued, retried)
+                                                   ├──▶ Dux REST API — one batch every day at 17:00
                                                    └──▶ CSV export (asistencias / horas)
 ```
 
@@ -90,10 +90,39 @@ Optional rules, all in `.env`:
 
 ## 5. Connecting to Dux software
 
-Every closed shift is written to a local **outbox** table first and pushed
+Every closed shift is written to a local **outbox** table first and uploaded
 from there, with exponential backoff and up to `DUX_MAX_ATTEMPTS` retries.
 If the network, the key or Dux itself is unavailable, nothing is lost: the
-clock keeps working and the queue drains later.
+clock keeps working and the queue drains on the next run.
+
+### When it uploads
+
+By default the hours go up **once a day at 17:00**, in the site's timezone:
+
+```bash
+DUX_SYNC_MODE=daily         # daily | continuous
+DUX_DAILY_TIME=17:00        # local wall-clock time, in TZ_NAME
+DUX_CATCH_UP_ON_START=true  # upload on boot if that hour was missed
+DUX_RETRY_INTERVAL_SECONDS=900
+```
+
+- Shifts **still open at 17:00** are not sent — nobody knows their hours yet.
+  They go out in the next day's run, once the worker has checked out.
+- If the upload cannot drain the queue (network down, Dux returning errors),
+  it retries every `DUX_RETRY_INTERVAL_SECONDS` rather than waiting a whole
+  day, and gives up for that round after `DUX_MAX_ATTEMPTS` per shift.
+- If the server was switched off at 17:00, it uploads as soon as it starts
+  again. Every run is recorded, so a restart never causes a double run.
+- `DUX_SYNC_MODE=continuous` pushes each shift about a minute after
+  check-out instead, using `DUX_SYNC_INTERVAL_SECONDS`.
+
+**Admin → Dux** shows the mode, the next run, the last run and a history of
+recent uploads, plus a **Subir ahora** button that runs the same batch on
+demand.
+
+Optionally, set `DAILY_EXPORT_DIR=./data/exports` to also drop a CSV of the
+day beside each upload. The previous day's file is refreshed on every run,
+so a check-out at 18:00 still lands in the right file.
 
 ```bash
 DUX_BASE_URL=https://erp.duxsoftware.com.ar
@@ -179,7 +208,12 @@ All settings live in `.env` (see `.env.example`).
 | `BREAK_MINUTES` / `BREAK_AFTER_HOURS` | `0` / `6` | Unpaid break deduction |
 | `ADMIN_TOKEN` | — | **Required.** Protects every admin route |
 | `KIOSK_KEY` | empty | Optional shared secret for kiosk terminals |
-| `DUX_*` | see above | Dux endpoint, auth and sync behaviour |
+| `DUX_SYNC_MODE` | `daily` | `daily` (one batch) or `continuous` |
+| `DUX_DAILY_TIME` | `17:00` | Local time of the daily upload |
+| `DUX_CATCH_UP_ON_START` | `true` | Upload on boot if the hour was missed |
+| `DUX_RETRY_INTERVAL_SECONDS` | `900` | Retry gap when a run cannot drain the queue |
+| `DUX_*` | see above | Dux endpoint, auth and retry limits |
+| `DAILY_EXPORT_DIR` | empty | Optional CSV copy written at upload time |
 | `DB_PATH` | `./data/timeclock.db` | SQLite file |
 
 ## 7. HTTP API
@@ -208,7 +242,9 @@ Admin — every route needs `Authorization: Bearer $ADMIN_TOKEN`:
 | `PATCH/DELETE` | `/api/admin/shifts/:id` | Correct or remove a shift |
 | `GET` | `/api/admin/export/shifts.csv` | Detail CSV |
 | `GET` | `/api/admin/export/summary.csv` | Summary CSV |
-| `GET` | `/api/admin/dux/status` | Queue counters and last error |
+| `GET` | `/api/admin/dux/status` | Queue counters, last error and the schedule |
+| `GET` | `/api/admin/sync/schedule` | Next run, last run, recent upload history |
+| `POST` | `/api/admin/sync/run` | Run the daily batch now |
 | `POST` | `/api/admin/dux/sync` | Drain the queue now |
 | `POST` | `/api/admin/dux/retry` | Re-queue failed rows |
 | `POST` | `/api/admin/dux/push/:shiftId` | Push one shift immediately |
@@ -231,6 +267,9 @@ Raspberry Pi, Windows or an Android tablet, and naming each terminal with
 Notes for a real installation:
 
 - Put a real value in `ADMIN_TOKEN`; the server warns on boot if you did not.
+- The daily upload runs inside the server process, so the machine has to be
+  on at 17:00. systemd keeps it running across reboots, and
+  `DUX_CATCH_UP_ON_START` covers a machine that was off at that hour.
 - Everything lives in one SQLite file — back up `data/timeclock.db`
   (`sqlite3 data/timeclock.db ".backup backup.db"`).
 - The server binds to the LAN. Do not expose it to the internet directly; if
@@ -245,7 +284,8 @@ src/
   config.js      .env loading and defaults
   db.js          SQLite schema (workers, tags, punches, shifts, dux_outbox)
   clock.js       The punch engine: toggle, debounce, auto-close, enrollment
-  dux.js         Dux payload, outbox, retry/backoff, sync loop
+  dux.js         Dux payload, outbox, retry/backoff
+  scheduler.js   The daily upload: when it runs, catch-up, run history
   timesheet.js   Range queries, per-worker totals, CSV builders
   time.js        Timezone, business days, rounding
   uid.js         Tag UID normalization across reader formats
@@ -261,10 +301,12 @@ deploy/          systemd unit and kiosk autostart notes
 npm test
 ```
 
-33 tests covering UID normalization across reader formats, business-day and
+41 tests covering UID normalization across reader formats, business-day and
 rounding maths, the full punch lifecycle (toggle, debounce, break deduction,
 auto-close, enrollment conflicts), the Dux payload, its retry/backoff and
-give-up behaviour, and the HTTP API end to end including auth and CSV export.
+give-up behaviour, the daily upload (next-run time across midnight, open
+shifts deferred to the next run, catch-up detection, overlap locking, the
+CSV copy), and the HTTP API end to end including auth and CSV export.
 
 ## 11. Ideas for later
 

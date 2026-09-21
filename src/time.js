@@ -78,6 +78,57 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+/** How far the zone is ahead of UTC at this instant, in milliseconds. */
+function zoneOffsetMs(value, timezone) {
+  const p = localParts(value, timezone);
+  const asUtc = Date.UTC(
+    Number(p.year),
+    Number(p.month) - 1,
+    Number(p.day),
+    Number(p.hour),
+    Number(p.minute),
+    Number(p.second)
+  );
+  return asUtc - Math.floor(toDate(value).getTime() / 1000) * 1000;
+}
+
+/**
+ * The instant at which a wall-clock time occurs in a timezone.
+ * The offset is re-read at the candidate instant so the result stays correct
+ * across a daylight-saving change.
+ */
+function zonedTimeToUtc(isoDay, hour, minute, timezone) {
+  const wallAsUtc = Date.UTC(
+    Number(isoDay.slice(0, 4)),
+    Number(isoDay.slice(5, 7)) - 1,
+    Number(isoDay.slice(8, 10)),
+    hour,
+    minute,
+    0
+  );
+  let instant = new Date(wallAsUtc - zoneOffsetMs(new Date(wallAsUtc), timezone));
+  const refined = zoneOffsetMs(instant, timezone);
+  const candidate = new Date(wallAsUtc - refined);
+  if (candidate.getTime() !== instant.getTime()) instant = candidate;
+  return instant;
+}
+
+/** "17:00" -> { hour: 17, minute: 0 }. Falls back to 17:00 on garbage input. */
+function parseClockTime(value, fallback = '17:00') {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim()) || /^(\d{1,2}):(\d{2})$/.exec(fallback);
+  const hour = Math.min(23, Math.max(0, Number(match[1])));
+  const minute = Math.min(59, Math.max(0, Number(match[2])));
+  return { hour, minute };
+}
+
+/** The next occurrence of a local wall-clock time, strictly after `from`. */
+function nextOccurrence(from, { hour, minute }, timezone) {
+  const today = localDate(from, timezone);
+  const todayRun = zonedTimeToUtc(today, hour, minute, timezone);
+  if (todayRun.getTime() > toDate(from).getTime()) return todayRun;
+  return zonedTimeToUtc(addDays(today, 1), hour, minute, timezone);
+}
+
 function minutesBetween(startIso, endIso) {
   return Math.max(0, Math.round((toDate(endIso) - toDate(startIso)) / 60000));
 }
@@ -101,6 +152,10 @@ function decimalHours(minutes) {
 
 module.exports = {
   localParts,
+  zoneOffsetMs,
+  zonedTimeToUtc,
+  parseClockTime,
+  nextOccurrence,
   localDate,
   localTime,
   localStamp,
