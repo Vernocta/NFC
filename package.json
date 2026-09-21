@@ -1,0 +1,22 @@
+{
+  "name": "nfc-timeclock",
+  "version": "1.0.0",
+  "description": "NFC check-in/check-out time clock for task workers, with Dux software integration",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test \"test/*.test.js\"",
+    "seed": "node scripts/seed.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.0",
+    "express": "^5.2.1"
+  },
+  "license": "MIT",
+  "private": true
+}

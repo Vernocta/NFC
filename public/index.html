@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d1117" />
+  <title>Reloj NFC · Fichaje</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>⏱</text></svg>" />
+</head>
+<body>
+  <main class="kiosk">
+    <div class="kiosk__top">
+      <div class="clock">
+        <div class="clock__time" id="clock-time">--:--</div>
+        <div class="clock__date" id="clock-date">&nbsp;</div>
+      </div>
+      <div class="row" style="gap: 8px">
+        <span class="pill"><span class="dot" id="conn-dot"></span><span id="conn-text">Conectando…</span></span>
+        <span class="pill" id="device-pill" hidden>Lector</span>
+      </div>
+    </div>
+
+    <section class="stage" id="stage">
+      <div>
+        <div class="stage__icon pulse" id="stage-icon">📶</div>
+        <h1 class="stage__headline" id="stage-headline">Acercá tu llavero</h1>
+        <p class="stage__name" id="stage-name" hidden></p>
+        <p class="stage__detail" id="stage-detail">El lector registra tu entrada o tu salida.</p>
+        <p class="stage__hint" id="stage-hint"></p>
+      </div>
+    </section>
+
+    <section class="onsite">
+      <div class="onsite__head">
+        <span id="onsite-title">En obra ahora</span>
+        <span id="onsite-count">0</span>
+      </div>
+      <div class="onsite__list" id="onsite-list">
+        <span class="muted" style="font-size: 13px" id="onsite-empty">Nadie fichado.</span>
+      </div>
+    </section>
+  </main>
+
+  <!-- Keyboard-wedge readers "type" the UID; this input keeps the focus. -->
+  <input class="hidden-input" id="wedge" autocomplete="off" inputmode="none" aria-hidden="true" tabindex="-1" />
+
+  <script src="/i18n.js"></script>
+  <script src="/kiosk.js"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# Install:
+#   sudo cp deploy/nfc-timeclock.service /etc/systemd/system/
+#   sudo systemctl enable --now nfc-timeclock
+[Unit]
+Description=NFC time clock (check-in / check-out)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/nfc-timeclock
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+# Settings live in the .env file next to the app.
+EnvironmentFile=-/opt/nfc-timeclock/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

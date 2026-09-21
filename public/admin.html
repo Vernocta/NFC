@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0d1117" />
+  <title>Reloj NFC · Administración</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>⚙️</text></svg>" />
+</head>
+<body>
+  <!-- Login -->
+  <section class="admin login" id="login">
+    <div class="card">
+      <h2>Administración</h2>
+      <label for="token">Token de acceso (ADMIN_TOKEN)</label>
+      <input type="password" id="token" autocomplete="current-password" placeholder="••••••••" />
+      <div class="row" style="margin-top: 12px">
+        <button id="login-btn">Entrar</button>
+        <a class="pill" href="/" style="text-decoration: none">Ir al kiosco</a>
+      </div>
+      <p class="muted" id="login-error" style="font-size: 13px; margin-bottom: 0"></p>
+    </div>
+  </section>
+
+  <!-- App -->
+  <main class="admin" id="app" hidden>
+    <header class="admin__header">
+      <h1>Reloj NFC · Administración</h1>
+      <div class="row" style="gap: 8px">
+        <a class="pill" href="/" style="text-decoration: none">Kiosco</a>
+        <button class="btn--ghost btn--sm" id="logout">Salir</button>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab tab--active" data-tab="board">Panel</button>
+      <button class="tab" data-tab="workers">Personal</button>
+      <button class="tab" data-tab="hours">Horas</button>
+      <button class="tab" data-tab="dux">Dux</button>
+    </nav>
+
+    <!-- Panel -->
+    <section data-panel="board">
+      <div class="grid" style="margin-bottom: 18px">
+        <div class="card" style="margin: 0">
+          <h2>En obra ahora</h2>
+          <div class="stat" id="stat-onsite">0</div>
+        </div>
+        <div class="card" style="margin: 0">
+          <h2>Horas de hoy</h2>
+          <div class="stat" id="stat-hours">0.00</div>
+        </div>
+        <div class="card" style="margin: 0">
+          <h2>Pendientes de Dux</h2>
+          <div class="stat" id="stat-pending">0</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Fichados</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Empleado</th><th>Entrada</th><th class="num">Tiempo</th><th></th></tr></thead>
+          <tbody id="onsite-body"></tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <h2>Llaveros no reconocidos</h2>
+        <p class="muted" style="font-size: 13px; margin-top: -6px">
+          Lecturas sin dueño. Copiá el UID y asignalo desde «Personal».
+        </p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>UID</th><th>Lector</th><th>Fecha</th><th></th></tr></thead>
+          <tbody id="unknown-body"></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- Personal -->
+    <section data-panel="workers" hidden>
+      <div class="card">
+        <h2>Nuevo empleado</h2>
+        <div class="grid">
+          <div><label for="w-name">Nombre y apellido *</label><input id="w-name" /></div>
+          <div><label for="w-code">Legajo</label><input id="w-code" placeholder="auto" /></div>
+          <div><label for="w-doc">DNI / CUIL</label><input id="w-doc" /></div>
+          <div><label for="w-role">Puesto</label><input id="w-role" /></div>
+          <div><label for="w-rate">Valor hora</label><input id="w-rate" type="number" step="0.01" min="0" /></div>
+          <div><label for="w-dux">ID en Dux</label><input id="w-dux" /></div>
+        </div>
+        <div class="row" style="margin-top: 12px"><button id="w-create">Agregar</button></div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content: space-between; margin-bottom: 12px">
+          <h2 style="margin: 0">Personal</h2>
+          <label class="muted" style="margin: 0; display: flex; gap: 7px; align-items: center; font-size: 13px">
+            <input type="checkbox" id="show-inactive" style="width: auto" /> Ver inactivos
+          </label>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Empleado</th><th>Legajo</th><th>Llaveros</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="workers-body"></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- Horas -->
+    <section data-panel="hours" hidden>
+      <div class="card">
+        <h2>Período</h2>
+        <div class="row">
+          <div><label for="f-from">Desde</label><input type="date" id="f-from" /></div>
+          <div><label for="f-to">Hasta</label><input type="date" id="f-to" /></div>
+          <div><label for="f-worker">Empleado</label><select id="f-worker"><option value="">Todos</option></select></div>
+          <button id="f-apply">Aplicar</button>
+          <button class="btn--ghost" id="dl-summary">CSV resumen</button>
+          <button class="btn--ghost" id="dl-shifts">CSV detalle</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Totales por empleado</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Empleado</th><th class="num">Días</th><th class="num">Turnos</th><th class="num">Horas</th><th class="num">Importe</th></tr></thead>
+          <tbody id="summary-body"></tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <h2>Detalle de turnos</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Fecha</th><th>Empleado</th><th>Entrada</th><th>Salida</th><th class="num">Horas</th><th>Estado</th><th>Dux</th><th></th></tr></thead>
+          <tbody id="shifts-body"></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- Dux -->
+    <section data-panel="dux" hidden>
+      <div class="card">
+        <h2>Conexión con Dux</h2>
+        <div id="dux-status"></div>
+        <div class="row" style="margin-top: 14px">
+          <button id="dux-sync">Sincronizar ahora</button>
+          <button class="btn--ghost" id="dux-retry">Reintentar fallidos</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Fichaje manual</h2>
+        <p class="muted" style="font-size: 13px; margin-top: -6px">Para quien olvidó el llavero.</p>
+        <div class="row">
+          <div><label for="m-worker">Empleado</label><select id="m-worker"></select></div>
+          <div><label for="m-dir">Movimiento</label><select id="m-dir"><option value="in">Entrada</option><option value="out">Salida</option></select></div>
+          <div><label for="m-at">Fecha y hora</label><input type="datetime-local" id="m-at" /></div>
+          <button id="m-save">Registrar</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/admin.js"></script>
+</body>
+</html>
