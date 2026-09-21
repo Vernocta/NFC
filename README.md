@@ -8,8 +8,9 @@ export as the fallback path.
 ```
  keychain tag ──▶ USB reader ──▶ kiosk page ──▶ server ──▶ SQLite
                                                    │
-                                                   ├──▶ Dux REST API — one batch every day at 17:00
-                                                   └──▶ CSV export (asistencias / horas)
+                                                   └──▶ daily close at 17:00
+                                                        ├── resumen_<mes>.csv  → liquidación in Dux
+                                                        └── asistencias_<día>.csv
 ```
 
 - **Kiosk** (`/`) — full-screen terminal for the entrance. One tap toggles
@@ -90,12 +91,40 @@ Optional rules, all in `.env`:
 
 ## 5. Connecting to Dux software
 
-Every closed shift is written to a local **outbox** table first and uploaded
-from there, with exponential backoff and up to `DUX_MAX_ATTEMPTS` retries.
-If the network, the key or Dux itself is unavailable, nothing is lost: the
-clock keeps working and the queue drains on the next run.
+**Dux has no attendance endpoint.** Its published API covers the commercial
+side — facturas, clientes, items, pedidos, gastos — with nothing for hours
+worked, attendance or payroll, and Dux's own guidance is that salaries are
+recorded through the **Gastos** module because there is no payroll module.
 
-### When it uploads
+So the hours are delivered as **CSV** and loaded during the liquidación.
+That is the default and it needs no Dux credentials at all. The push
+machinery below is still here for the day you have somewhere to push to.
+
+### The daily close
+
+Every day at 17:00 the server writes three files to `DAILY_EXPORT_DIR`
+(`./data/exports` by default):
+
+| File | What it holds |
+| --- | --- |
+| `resumen_<YYYY-MM>.csv` | Per-worker totals for the month so far — **the file for the liquidación** |
+| `asistencias_<YYYY-MM-DD>.csv` | Shift detail for that day |
+| `asistencias_<yesterday>.csv` | Refreshed, so a check-out after 17:00 still lands in it |
+
+All three are rewritten on every run, so the monthly summary is always
+current: at liquidación time the file is simply there. Any other period can
+be downloaded from **Admin → Horas**.
+
+### Pushing to an API (optional)
+
+Every closed shift is also written to a local **outbox** table. If you ever
+point `DUX_TIMESHEET_PATH` at an endpoint — one Dux support enables for you,
+or middleware of your own — the daily close starts sending them, with
+exponential backoff and up to `DUX_MAX_ATTEMPTS` retries, and the backlog
+goes out with it. Until then the outbox just accumulates harmlessly and the
+admin console hides it.
+
+### When it runs
 
 By default the hours go up **once a day at 17:00**, in the site's timezone:
 
@@ -106,8 +135,8 @@ DUX_CATCH_UP_ON_START=true  # upload on boot if that hour was missed
 DUX_RETRY_INTERVAL_SECONDS=900
 ```
 
-- Shifts **still open at 17:00** are not sent — nobody knows their hours yet.
-  They go out in the next day's run, once the worker has checked out.
+- Shifts **still open at 17:00** are not counted — nobody knows their hours
+  yet. They appear in the next day's run, once the worker has checked out.
 - If the upload cannot drain the queue (network down, Dux returning errors),
   it retries every `DUX_RETRY_INTERVAL_SECONDS` rather than waiting a whole
   day, and gives up for that round after `DUX_MAX_ATTEMPTS` per shift.
@@ -120,9 +149,7 @@ DUX_RETRY_INTERVAL_SECONDS=900
 recent uploads, plus a **Subir ahora** button that runs the same batch on
 demand.
 
-Optionally, set `DAILY_EXPORT_DIR=./data/exports` to also drop a CSV of the
-day beside each upload. The previous day's file is refreshed on every run,
-so a check-out at 18:00 still lands in the right file.
+Set `DAILY_EXPORT_DIR=` (empty) to turn the CSV files off.
 
 ```bash
 DUX_BASE_URL=https://erp.duxsoftware.com.ar/WSERP/rest/services/v2
@@ -187,9 +214,9 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 **Admin → Dux** shows the queue (sent / pending / failed), the last error, a
 *Sincronizar ahora* button and *Reintentar fallidos*.
 
-### CSV export
+### Downloading any period
 
-Works whether or not the API is configured — **Admin → Horas**:
+**Admin → Horas** exports any date range on demand:
 
 - `CSV resumen` — one line per worker: `legajo, empleado, documento,
   dux_empleado_id, dias, turnos, horas, valor_hora, importe`.
@@ -223,7 +250,7 @@ All settings live in `.env` (see `.env.example`).
 | `DUX_RETRY_INTERVAL_SECONDS` | `900` | Retry gap when a run cannot drain the queue |
 | `DUX_EMPRESA_ID` | empty | Dux company id, added to every Dux call |
 | `DUX_*` | see above | Dux endpoint, auth and retry limits |
-| `DAILY_EXPORT_DIR` | empty | Optional CSV copy written at upload time |
+| `DAILY_EXPORT_DIR` | `./data/exports` | Where the daily close writes its CSVs |
 | `DB_PATH` | `./data/timeclock.db` | SQLite file |
 
 ## 7. HTTP API
@@ -312,13 +339,14 @@ deploy/          systemd unit and kiosk autostart notes
 npm test
 ```
 
-46 tests covering UID normalization across reader formats, business-day and
+51 tests covering UID normalization across reader formats, business-day and
 rounding maths, the full punch lifecycle (toggle, debounce, break deduction,
 auto-close, enrollment conflicts), the Dux payload, its retry/backoff and
 give-up behaviour, the daily upload (next-run time across midnight, open
 shifts deferred to the next run, catch-up detection, overlap locking, the
-CSV copy), the Dux connection test against `/empresas`, and the HTTP API end
-to end including auth and CSV export.
+CSV copy), the Dux connection test against `/empresas`, the CSV-only daily close
+(month boundaries, late check-outs, totals and amounts), and the HTTP API
+end to end including auth and CSV export.
 
 ## 11. Ideas for later
 

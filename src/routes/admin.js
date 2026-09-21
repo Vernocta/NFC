@@ -315,6 +315,8 @@ function describeSchedule(db) {
   const daily = config.dux.syncMode === 'daily';
   return {
     mode: config.dux.syncMode,
+    // Whether the run has anywhere to push, or is a CSV-only close.
+    pushConfigured: config.dux.configured,
     dailyTime: config.dux.dailyTime,
     timezone: config.timezone,
     intervalSeconds: config.dux.syncIntervalSeconds,

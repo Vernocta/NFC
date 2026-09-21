@@ -154,18 +154,27 @@ document.querySelectorAll('.tab').forEach((tab) => {
 /* ----------------------------------------------------------------- board */
 
 async function loadBoard() {
-  const [onSite, dux, sheet] = await Promise.all([
+  const monthStart = `${todayIso().slice(0, 7)}-01`;
+  const [onSite, dux, sheet, month] = await Promise.all([
     api('/onsite'),
     api('/dux/status'),
     api(`/timesheet?from=${todayIso()}&to=${todayIso()}`),
+    api(`/timesheet?from=${monthStart}&to=${todayIso()}`),
   ]);
 
   $('stat-onsite').textContent = onSite.length;
-  $('stat-pending').textContent = dux.counts.pending + dux.counts.failed;
+
+  // With no push target the Dux queue never drains, so counting it would just
+  // show a number nobody can act on; the month's hours are what matters then.
+  const pushes = dux.schedule?.pushConfigured;
+  $('stat-pending-label').textContent = pushes ? 'Pendientes de Dux' : 'Horas del mes';
+  $('stat-pending').textContent = pushes
+    ? dux.counts.pending + dux.counts.failed
+    : month.summary.reduce((sum, s) => sum + s.hours, 0).toFixed(2);
   $('stat-next').textContent =
     dux.schedule?.mode === 'daily'
-      ? `Próxima subida: ${relativeRun(dux.schedule.nextRunAt)}`
-      : 'Subida continua';
+      ? `Próximo cierre: ${relativeRun(dux.schedule.nextRunAt)}`
+      : 'Cierre continuo';
   $('stat-hours').textContent = sheet.summary.reduce((sum, s) => sum + s.hours, 0).toFixed(2);
 
   $('onsite-body').innerHTML = onSite.length
@@ -446,55 +455,95 @@ $('dl-shifts').addEventListener('click', () => {
 async function loadDux() {
   const status = await api('/dux/status');
   renderSchedule(status.schedule);
+
+  // Without a push target the queue counters are noise, and so are the
+  // buttons that drain it.
+  const pushes = status.schedule?.pushConfigured;
+  $('dux-sync').hidden = !pushes;
+  $('dux-retry').hidden = !pushes;
+
   $('dux-status').innerHTML = `
     <div class="grid">
-      <div><label>Estado</label>${
-        status.configured
-          ? '<span class="badge badge--sent">Configurado</span>'
-          : '<span class="badge badge--pending">Sin configurar</span>'
+      <div><label>Credenciales</label>${
+        status.credentialsPresent
+          ? '<span class="badge badge--sent">Cargadas</span>'
+          : '<span class="badge badge--pending">Sin cargar</span>'
       }</div>
-      <div><label>Endpoint</label><code style="font-size:12px">${esc(status.endpoint || 'DUX_BASE_URL vacío')}</code></div>
-      <div><label>Sincronización</label>${status.syncEnabled ? 'automática' : 'manual'}</div>
-      <div><label>Enviados</label><strong>${status.counts.sent}</strong></div>
-      <div><label>Pendientes</label><strong>${status.counts.pending}</strong></div>
-      <div><label>Fallidos</label><strong>${status.counts.failed}</strong></div>
+      <div><label>Base de la API</label><code style="font-size:12px">${esc(
+        status.baseUrl || 'DUX_BASE_URL vacío'
+      )}</code></div>
+      <div><label>id_empresa</label>${
+        status.empresaId ? `<code>${esc(status.empresaId)}</code>` : '<span class="muted">sin definir</span>'
+      }</div>
+      ${
+        pushes
+          ? `<div><label>Endpoint de envío</label><code style="font-size:12px">${esc(status.endpoint)}</code></div>
+             <div><label>Enviados</label><strong>${status.counts.sent}</strong></div>
+             <div><label>Pendientes</label><strong>${status.counts.pending}</strong></div>
+             <div><label>Fallidos</label><strong>${status.counts.failed}</strong></div>`
+          : ''
+      }
     </div>
     ${
-      status.lastError
+      status.lastError && pushes
         ? `<p class="muted" style="font-size:13px;margin-bottom:0">Último error (turno #${status.lastError.shift_id}, intento ${status.lastError.attempts}): ${esc(status.lastError.last_error)}</p>`
         : ''
     }
     ${
-      status.configured
+      pushes
         ? ''
-        : '<p class="muted" style="font-size:13px;margin-bottom:0">Los fichajes se guardan igual y quedan en cola. Cargá DUX_BASE_URL y DUX_API_KEY en el archivo .env y reiniciá el servicio para empezar a enviarlos.</p>'
+        : `<p class="muted" style="font-size:13px;margin-bottom:0">
+             La API de Dux cubre la parte comercial (facturas, clientes, items, gastos) y no publica
+             un endpoint de asistencias ni de sueldos, así que no hay adónde enviar las horas: se
+             entregan por CSV. Cargá el token igual si querés usar la API para otra cosa —
+             «Probar conexión» valida el token y muestra tu <code>id_empresa</code>.
+             Si Dux te habilita un endpoint, poné la ruta en <code>DUX_TIMESHEET_PATH</code> y el
+             cierre diario empieza a enviarlos solo.
+           </p>`
     }`;
 }
+
+const fileName = (p) => (p ? String(p).split(/[\\/]/).pop() : '');
 
 function renderSchedule(schedule) {
   if (!schedule) return;
   const daily = schedule.mode === 'daily';
+  const pushes = schedule.pushConfigured;
   const last = schedule.lastRun;
+
+  $('close-title').textContent = pushes ? 'Cierre diario y subida a Dux' : 'Cierre diario (CSV)';
+  $('dux-run').textContent = pushes ? 'Cerrar y subir ahora' : 'Generar CSV ahora';
 
   $('dux-schedule').innerHTML = `
     <div class="grid">
-      <div><label>Modo</label>${
+      <div><label>Cuándo</label>${
         daily
-          ? `<strong>Una vez por día a las ${esc(schedule.dailyTime)}</strong>`
-          : `<strong>Continua (cada ${schedule.intervalSeconds}s)</strong>`
+          ? `<strong>Todos los días a las ${esc(schedule.dailyTime)}</strong>`
+          : `<strong>Continuo (cada ${schedule.intervalSeconds}s)</strong>`
       }</div>
       <div><label>Zona horaria</label>${esc(schedule.timezone)}</div>
-      <div><label>Próxima subida</label><strong>${daily ? relativeRun(schedule.nextRunAt) : 'continua'}</strong></div>
-      <div><label>Última subida</label>${
-        last ? `${dateTime(last.started_at)} · ${last.sent} enviados` : '<span class="muted">todavía ninguna</span>'
+      <div><label>Próximo cierre</label><strong>${daily ? relativeRun(schedule.nextRunAt) : 'continuo'}</strong></div>
+      <div><label>Último cierre</label>${
+        last
+          ? `${dateTime(last.started_at)}${last.sent ? ` · ${last.sent} enviados` : ''}`
+          : '<span class="muted">todavía ninguno</span>'
       }</div>
-      ${schedule.exportDir ? `<div><label>Copia CSV</label><code style="font-size:12px">${esc(schedule.exportDir)}</code></div>` : ''}
+      <div><label>Carpeta de CSV</label>${
+        schedule.exportDir
+          ? `<code style="font-size:12px">${esc(schedule.exportDir)}</code>`
+          : '<span class="muted">desactivada</span>'
+      }</div>
+      <div><label>Destino en Dux</label>${
+        pushes ? '<span class="badge badge--sent">API</span>' : '<span class="badge">carga manual</span>'
+      }</div>
     </div>
-    ${
-      daily
-        ? '<p class="muted" style="font-size:13px;margin-bottom:0">Los turnos que sigan abiertos a esa hora viajan en la subida del día siguiente, una vez que la persona marque la salida.</p>'
-        : ''
-    }`;
+    <p class="muted" style="font-size:13px;margin-bottom:0">
+      ${
+        pushes
+          ? 'Los turnos que sigan abiertos a esa hora viajan en el cierre del día siguiente, una vez que la persona marque la salida.'
+          : 'Dux no tiene un endpoint de asistencias, así que las horas se entregan por CSV. Cada cierre reescribe <code>resumen_&lt;mes&gt;.csv</code> con los totales por empleado del mes en curso: ese es el archivo para la liquidación. También podés bajar cualquier período desde la pestaña «Horas».'
+      }
+    </p>`;
 
   $('runs-body').innerHTML = (schedule.history || []).length
     ? schedule.history
@@ -502,29 +551,31 @@ function renderSchedule(schedule) {
           (run) => `<tr>
             <td>${dateTime(run.started_at)}</td>
             <td><span class="badge">${RUN_LABEL[run.kind] || esc(run.kind)}</span></td>
-            <td class="num">${run.sent}</td>
-            <td class="num">${run.failed}</td>
-            <td class="num">${run.remaining}</td>
-            <td>${
-              run.error
-                ? `<span class="badge badge--failed" title="${esc(run.error)}">${
-                    run.error === 'dux_not_configured' ? 'Dux sin configurar' : 'Error'
-                  }</span>`
-                : '<span class="badge badge--sent">OK</span>'
-            }</td>
+            <td><code style="font-size:12px">${esc(fileName(run.export_file)) || '—'}</code></td>
+            <td class="num">${pushes ? run.sent : '—'}</td>
+            <td class="num">${pushes ? run.remaining : '—'}</td>
+            <td>${runOutcome(run)}</td>
           </tr>`
         )
         .join('')
-    : '<tr><td colspan="6" class="empty">Sin subidas registradas todavía.</td></tr>';
+    : '<tr><td colspan="6" class="empty">Sin cierres registrados todavía.</td></tr>';
+}
+
+function runOutcome(run) {
+  if (run.error) return `<span class="badge badge--failed" title="${esc(run.error)}">Error</span>`;
+  if (run.sent) return `<span class="badge badge--sent">${run.sent} enviados</span>`;
+  if (run.export_file) return '<span class="badge badge--sent">CSV generado</span>';
+  return '<span class="badge">Sin novedades</span>';
 }
 
 $('dux-run').addEventListener('click', async () => {
   $('dux-run').disabled = true;
   try {
     const result = await api('/sync/run', { method: 'POST' });
-    if (result.skipped) toast('Ya hay una subida en curso.', true);
-    else if (result.error === 'dux_not_configured') toast('Dux no está configurado: los turnos siguen en cola.', true);
-    else toast(`Subida lista: ${result.sent} enviados, ${result.remaining} en cola.`);
+    if (result.skipped) toast('Ya hay un cierre en curso.', true);
+    else if (result.error) toast(`Error en el cierre: ${result.error}`, true);
+    else if (result.pushes) toast(`Cierre listo: ${result.sent} enviados, ${result.remaining} en cola.`);
+    else toast(`CSV generado: ${fileName(result.exportFile)}`);
     loadDux();
   } catch (error) {
     toast(error.message, true);

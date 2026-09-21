@@ -43,6 +43,14 @@ function recentRuns(db, limit = 10) {
   return db.prepare('SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT ?').all(limit);
 }
 
+/** "2026-09" -> "2026-09-30", via the day before the 1st of the next month. */
+function lastDayOfMonth(month) {
+  const year = Number(month.slice(0, 4));
+  const index = Number(month.slice(5, 7));
+  const nextMonth = index === 12 ? `${year + 1}-01` : `${month.slice(0, 5)}${String(index + 1).padStart(2, '0')}`;
+  return time.addDays(`${nextMonth}-01`, -1);
+}
+
 function writeDayCsv(dir, db, businessDay) {
   const file = path.join(dir, `asistencias_${businessDay}.csv`);
   const shifts = timesheet.listShifts(db, { from: businessDay, to: businessDay, includeOpen: false });
@@ -50,20 +58,40 @@ function writeDayCsv(dir, db, businessDay) {
   return file;
 }
 
+/** Per-worker totals for the month `businessDay` falls in. */
+function writeMonthCsv(dir, db, businessDay) {
+  const month = businessDay.slice(0, 7);
+  const from = `${month}-01`;
+  const to = lastDayOfMonth(month);
+  const file = path.join(dir, `resumen_${month}.csv`);
+  const shifts = timesheet.listShifts(db, { from, to, includeOpen: false });
+  fs.writeFileSync(file, timesheet.summaryCsv(timesheet.summarize(shifts)), 'utf8');
+  return file;
+}
+
 /**
- * Write the day's shift detail next to the upload, when DAILY_EXPORT_DIR is set.
+ * Write the day's CSVs. This is the deliverable when the hours are keyed into
+ * Dux by hand during the liquidación, so it runs whether or not a push target
+ * is configured.
  *
- * The previous day is rewritten as well: at 17:00 people are still on site, so
- * a check-out at 18:00 lands in the database after that day's file was first
- * written. Refreshing it on the next run is what makes each file complete.
- * Returns the path of the current day's file.
+ * Three files, all rewritten on every run:
+ *  - asistencias_<day>.csv      shift detail for today
+ *  - asistencias_<yesterday>.csv  refreshed, because at 17:00 people are still
+ *    on site and a check-out at 18:00 lands after today's file was written
+ *  - resumen_<month>.csv        per-worker totals so far this month — the file
+ *    whoever does the liquidación actually opens
+ *
+ * Returns the paths, with the monthly summary first.
  */
 function writeDailyExport(db, businessDay) {
-  if (!config.dailyExportDir) return null;
+  if (!config.dailyExportDir) return [];
   const dir = path.resolve(__dirname, '..', config.dailyExportDir);
   fs.mkdirSync(dir, { recursive: true });
-  writeDayCsv(dir, db, time.addDays(businessDay, -1));
-  return writeDayCsv(dir, db, businessDay);
+  return [
+    writeMonthCsv(dir, db, businessDay),
+    writeDayCsv(dir, db, businessDay),
+    writeDayCsv(dir, db, time.addDays(businessDay, -1)),
+  ];
 }
 
 /**
@@ -89,24 +117,27 @@ async function runUpload(db, { kind = 'daily', ...options } = {}) {
     let sent = 0;
     let failed = 0;
     let error = null;
-    let exportFile = null;
+    let exportFiles = [];
+    // Without a push target this is a CSV-only close, which is a valid setup,
+    // not a failure — Dux publishes no attendance endpoint to push to.
+    const pushes = config.dux.configured;
 
     try {
-      // Drain in passes: a large backlog needs more than one page of rows.
-      for (let pass = 0; pass < 20; pass += 1) {
-        const result = await dux.processOutbox(db, { limit: 50, ...options });
-        if (result.skipped) {
-          error = 'dux_not_configured';
-          break;
+      if (pushes) {
+        // Drain in passes: a large backlog needs more than one page of rows.
+        for (let pass = 0; pass < 20; pass += 1) {
+          const result = await dux.processOutbox(db, { limit: 50, ...options });
+          if (result.skipped) break;
+          sent += result.sent;
+          failed += result.failed;
+          if (!result.processed || result.failed) break;
         }
-        sent += result.sent;
-        failed += result.failed;
-        if (!result.processed || result.failed) break;
       }
-      exportFile = writeDailyExport(db, businessDay);
+      exportFiles = writeDailyExport(db, businessDay);
     } catch (caught) {
       error = caught.message;
     }
+    const exportFile = exportFiles[0] || null;
 
     const remaining = db
       .prepare("SELECT COUNT(*) AS n FROM dux_outbox WHERE status IN ('pending', 'failed')")
@@ -118,7 +149,7 @@ async function runUpload(db, { kind = 'daily', ...options } = {}) {
         WHERE id = ?`
     ).run(time.nowIso(), sent, failed, remaining, exportFile, error, runId);
 
-    return { id: runId, kind, businessDay, sent, failed, remaining, openShifts, exportFile, error };
+    return { id: runId, kind, businessDay, sent, failed, remaining, openShifts, exportFile, exportFiles, pushes, error };
   } finally {
     uploadInFlight = false;
   }
@@ -148,8 +179,12 @@ function startDailyScheduler(db, { onRun = null, ...options } = {}) {
     try {
       const result = await runUpload(db, { kind, ...options });
       if (result.skipped) return result;
-      const detail = result.error ? `error: ${result.error}` : `${result.sent} sent, ${result.failed} failed`;
-      console.log(`[sync] ${kind} upload — ${detail}, ${result.remaining} still queued`);
+      const detail = result.error
+        ? `error: ${result.error}`
+        : result.pushes
+          ? `${result.sent} sent, ${result.failed} failed, ${result.remaining} still queued`
+          : `${result.exportFiles.length} CSV file(s) written`;
+      console.log(`[close] ${kind} run — ${detail}`);
       onRun?.(result);
       armRetry(result);
       return result;
@@ -166,7 +201,7 @@ function startDailyScheduler(db, { onRun = null, ...options } = {}) {
   // network blip at 17:00 does not hold the hours back for a whole day.
   const armRetry = (result) => {
     clearTimeout(retryTimer);
-    if (stopped || !result || result.error === 'dux_not_configured' || !result.remaining) return;
+    if (stopped || !result || !result.pushes || !result.remaining) return;
     retryTimer = setTimeout(() => execute('retry'), Math.max(60, config.dux.retryIntervalSeconds) * 1000);
     retryTimer.unref?.();
   };
@@ -199,6 +234,7 @@ function startDailyScheduler(db, { onRun = null, ...options } = {}) {
 
 module.exports = {
   nextRunAt,
+  writeMonthCsv,
   todaysRunAt,
   runUpload,
   needsCatchUp,

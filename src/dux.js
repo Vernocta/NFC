@@ -251,6 +251,9 @@ function outboxStatus(db) {
     .get();
   return {
     configured: config.dux.configured,
+    credentialsPresent: config.dux.credentialsPresent,
+    baseUrl: config.dux.baseUrl || null,
+    empresaId: config.dux.empresaId || null,
     endpoint: config.dux.configured ? targetUrl().replace(/(key=)[^&]+/, '$1***') : null,
     syncEnabled: config.dux.syncEnabled,
     counts,

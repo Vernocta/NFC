@@ -90,8 +90,8 @@ const config = {
     timeoutMs: num('DUX_TIMEOUT_MS', 15000),
   },
 
-  // Optional: drop a CSV of the day next to each scheduled upload.
-  dailyExportDir: str('DAILY_EXPORT_DIR', ''),
+  // Where the daily close writes its CSVs. Set it to '' to turn them off.
+  dailyExportDir: str('DAILY_EXPORT_DIR', './data/exports'),
 };
 
 // A base URL alone is not enough to push: Dux has no attendance endpoint, so
